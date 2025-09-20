@@ -38,7 +38,7 @@ export function useTranslator() {
       const data = await res.json();
       if (data.translated) setTranslated(data.translated);
       else setError(data.error || 'Translation failed');
-    } catch (e) {
+    } catch  {
       setError('Translation failed');
     }
     setLoading(false);
