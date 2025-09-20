@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Translator — English ↔ Tamil</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Translator (default: English → Tamil)</h1>
+
+    <div class="controls">
+      <div>
+        <label for="fromSelect">From</label>
+        <select id="fromSelect"></select>
+      </div>
+      <button id="swapBtn" title="Swap languages">⇄</button>
+      <div>
+        <label for="toSelect">To</label>
+        <select id="toSelect"></select>
+      </div>
+    </div>
+
+    <div class="panes">
+      <div class="pane">
+        <textarea id="sourceText" placeholder="Type text to translate..." rows="8"></textarea>
+        <div class="pane-actions">
+          <button id="clearBtn">Clear</button>
+          <button id="translateBtn">Translate</button>
+        </div>
+      </div>
+
+      <div class="pane">
+        <textarea id="resultText" readonly rows="8" placeholder="Translation appears here"></textarea>
+        <div class="pane-actions">
+          <span id="detected">Detected: —</span>
+          <button id="copyBtn">Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <small>Uses @vitalets/google-translate-api • Default en → ta. Select any languages and swap direction.</small>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
