@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
     }
     const result = await translate(text, { from: from || 'en', to });
     return NextResponse.json({ translated: result.text });
-  } catch (error) {
+  } catch  {
     return NextResponse.json({ error: 'Translation failed' }, { status: 500 });
   }
 }

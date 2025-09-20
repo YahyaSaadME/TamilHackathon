@@ -2,10 +2,26 @@
 "use client";
 
 import { useState, useEffect } from "react";
+// Import the correct type from the library
+import type { TranslationPipeline } from "@xenova/transformers";
 
-type TranslationPipeline = (input: string, options?: any) => Promise<{ translation_text: string }[]>;
+// Define the options type for the translation pipeline
+// interface TranslationPipelineOptions {
+//   src_lang?: string;
+//   tgt_lang?: string;
+//   progress_callback?: (progress: ProgressInfo) => void;
+//   [key: string]: unknown; // Allow other options if needed
+// }
+
+// Define the progress info type
+interface ProgressInfo {
+  progress: number; // 0 to 1
+  status?: string;
+  [key: string]: unknown; // Allow other properties
+}
 
 export default function Translator() {
+  // Use the imported type here
   const [translator, setTranslator] = useState<TranslationPipeline | null>(null);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
@@ -43,7 +59,7 @@ export default function Translator() {
           // Create the pipeline with proper error handling
           const model = await pipeline("translation", modelId, {
             // Add progress callback
-            progress_callback: (progress: any) => {
+            progress_callback: (progress: ProgressInfo) => {
               console.log("Model loading progress:", progress);
             }
           });
@@ -52,7 +68,7 @@ export default function Translator() {
             throw new Error("Failed to initialize translation pipeline");
           }
 
-          setTranslator(() => model);
+          setTranslator(model); // model matches imported TranslationPipeline type
           localStorage.setItem("translator-downloaded", "true");
         } else {
           throw new Error("Model loading only supported in browser environment");
@@ -80,10 +96,8 @@ export default function Translator() {
       // For NLLB models, you would need: { src_lang: "eng_Latn", tgt_lang: "spa_Latn" }
       const result = await translator(input);
       
-      if (result && result.length > 0 && result[0].translation_text) {
-        setOutput(result[0].translation_text);
-      } else {
-        throw new Error("Invalid translation result");
+      if (result && result.length > 0 && Object(result[0]).translation_text) {
+        setOutput(Object(result[0]).translation_text);
       }
     } catch (e: unknown) {
       console.error("Translation error:", e);

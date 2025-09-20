@@ -3,6 +3,7 @@
 import React, { useState, useRef } from "react";
 import Tesseract from "tesseract.js";
 import { Camera, Upload, FileText, Settings, Loader2, X, Copy } from "lucide-react";
+import Image from "next/image";
 
 const languages = [
   { code: "tam", name: "Tamil" },
@@ -286,9 +287,11 @@ export default function OCR() {
             </button>
           </div>
           <div className="border rounded-lg overflow-hidden">
-            <img
+            <Image
               src={imageUrl}
               alt="Preview"
+              width={600} // Add width prop
+  height={400}
               className="w-full max-h-96 object-contain bg-gray-50"
             />
           </div>
