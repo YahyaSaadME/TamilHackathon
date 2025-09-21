@@ -1,12 +1,41 @@
 "use client";
 import React, { useState } from 'react';
 import { LANGUAGES, useTranslator } from '@/hooks/useTranslator';
-import { RefreshCw, Languages, ArrowRight, Copy, Volume2 } from 'lucide-react';
+import { RefreshCw, Languages, ArrowRight, Copy, Volume2, Mic, Speaker } from 'lucide-react';
+
+// Type declarations for Speech Recognition API
+declare global {
+  interface Window {
+    SpeechRecognition: new () => SpeechRecognition;
+    webkitSpeechRecognition: new () => SpeechRecognition;
+  }
+
+  interface SpeechRecognition extends EventTarget {
+    lang: string;
+    continuous: boolean;
+    interimResults: boolean;
+    onstart: () => void;
+    onend: () => void;
+    onresult: (event: SpeechRecognitionEvent) => void;
+    onerror: (event: SpeechRecognitionErrorEvent) => void;
+    start(): void;
+    stop(): void;
+  }
+}
+
+interface SpeechRecognitionEvent extends Event {
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+}
 
 export default function Translator() {
   const [input, setInput] = useState('');
   const [from, setFrom] = useState('en');
   const [to, setTo] = useState('ta');
+  const [isListening, setIsListening] = useState(false);
   const { loading, translated, error, translateText } = useTranslator();
 
   const handleTranslate = () => {
@@ -25,8 +54,41 @@ export default function Translator() {
     }
   };
 
+  const startListening = () => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      alert('Speech recognition is not supported in this browser.');
+      return;
+    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.lang = from;
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = event.results[0][0].transcript;
+      setInput(transcript);
+      setIsListening(false);
+    };
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error('Speech recognition error:', event.error);
+      setIsListening(false);
+    };
+    recognition.onend = () => setIsListening(false);
+    recognition.start();
+  };
+
+  const speakText = () => {
+    if (!translated) return;
+    const utterance = new SpeechSynthesisUtterance(translated);
+    const voices = speechSynthesis.getVoices();
+    const voice = voices.find(v => v.lang.startsWith(to.split('-')[0]));
+    if (voice) utterance.voice = voice;
+    speechSynthesis.speak(utterance);
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen  flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-2xl bg-white rounded-3xl shadow-xl border border-blue-100 overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-6">
@@ -86,9 +148,21 @@ export default function Translator() {
 
           {/* Input Section */}
           <div className="mb-6">
-            <label className="block text-sm font-semibold mb-2 text-gray-700">
-              Enter text to translate
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-semibold text-gray-700">
+                Enter text to translate
+              </label>
+              <button
+                type="button"
+                onClick={startListening}
+                disabled={isListening}
+                className="flex items-center gap-1 px-3 py-1 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all disabled:opacity-50"
+                title="Speak to input text"
+              >
+                <Mic className={`w-4 h-4 ${isListening ? 'animate-pulse text-red-500' : ''}`} />
+                {isListening ? 'Listening...' : 'Listen'}
+              </button>
+            </div>
             <textarea
               value={input}
               onChange={e => setInput(e.target.value)}
@@ -122,17 +196,30 @@ export default function Translator() {
           <div className="mt-6">
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-semibold text-gray-700">Translation</label>
-              {translated && !error && (
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="flex items-center gap-1 px-3 py-1 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all"
-                  title="Copy translation"
-                >
-                  <Copy className="w-4 h-4" />
-                  Copy
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {translated && !error && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={speakText}
+                      className="flex items-center gap-1 px-3 py-1 text-sm text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg transition-all"
+                      title="Speak translation"
+                    >
+                      <Speaker className="w-4 h-4" />
+                      Speak
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopy}
+                      className="flex items-center gap-1 px-3 py-1 text-sm text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all"
+                      title="Copy translation"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copy
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
             <div className="min-h-[100px] p-4 border-2 border-gray-200 rounded-xl bg-gray-50 text-gray-800 flex items-center">
               {error ? (
@@ -149,14 +236,6 @@ export default function Translator() {
           </div>
         </div>
       </div>
-
-      {/* Footer */}
-      <footer className="mt-8 text-sm text-gray-500 text-center bg-white px-6 py-3 rounded-full shadow-md">
-        <div className="flex items-center justify-center gap-2">
-          <Languages className="w-4 h-4 text-blue-600" />
-          Powered by Google Translate API © {new Date().getFullYear()}
-        </div>
-      </footer>
     </div>
   );
 }

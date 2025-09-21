@@ -1,0 +1,229 @@
+// translation.ts
+
+// ✅ Safe imports: only load tfjs/tflite in browser
+let tf: typeof import('@tensorflow/tfjs') | undefined;
+let tflite: typeof import('@tensorflow/tfjs-tflite') | undefined;
+
+async function ensureTfAndTfliteLoaded() {
+  if (typeof window === "undefined") throw new Error("Must run in browser");
+  if (!tf) {
+    // @ts-expect-error
+    tf = (await import('@tensorflow/tfjs'));
+  }
+  if (!tflite) {
+    // @ts-expect-error
+    tflite = (await import('@tensorflow/tfjs-tflite'));
+  }
+}
+
+import { AutoTokenizer, AutoConfig } from '@huggingface/transformers';
+
+type TFLiteModel = {
+  predict: (inputs: Record<string, any>) => { arraySync: () => number[][][] };
+};
+type Tokenizer = {
+  encode: (text: string) => { ids: number[]; attentionMask: number[] };
+  decode: (ids: number[], opts?: { skipSpecialTokens?: boolean }) => string;
+  padTokenId: number;
+  bosTokenId: number;
+  eosTokenId: number;
+};
+type Config = {
+  decoder_start_token_id?: number;
+};
+
+let model: TFLiteModel | null = null;
+let tokenizer: Tokenizer | null = null;
+let config: Config | null = null;
+let modelDownloadProgress = 0;
+let modelDownloaded = false;
+let modelDownloadError = '';
+
+const MAX_SRC_LEN = 128;
+const MAX_TGT_LEN = 128;
+
+export function getModelDownloadStatus() {
+  return {
+    progress: modelDownloadProgress,
+    downloaded: modelDownloaded,
+    error: modelDownloadError,
+  };
+}
+
+export function isModelLoaded() {
+  return !!model;
+}
+
+async function loadResources(): Promise<{ model: TFLiteModel; tokenizer: Tokenizer; config: Config }> {
+  if (typeof window === "undefined") {
+    throw new Error("Translation only works in browser/client-side.");
+  }
+
+  await ensureTfAndTfliteLoaded();
+
+  if (model) {
+    console.log("[TFLite] Using cached model instance.");
+  }
+
+  if (!model) {
+    try {
+      modelDownloadProgress = 0;
+      modelDownloaded = false;
+      modelDownloadError = '';
+      console.log("[TFLite] Model download started.");
+
+      const modelUrl = '/assets/models/opus_mt_en_fr_flex_quant.tflite';
+      const response = await fetch(modelUrl);
+      if (!response.ok) {
+        console.error('[TFLite] Model download failed:', response.statusText);
+        throw new Error('Model download failed: ' + response.statusText);
+      }
+
+      const contentLength = response.headers.get('content-length');
+      let buffer: Uint8Array;
+      if (contentLength) {
+        const total = parseInt(contentLength, 10);
+        const reader = response.body!.getReader();
+        let received = 0;
+        const chunks: Uint8Array[] = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            chunks.push(value);
+            received += value.length;
+            modelDownloadProgress = Math.round((received / total) * 100);
+            console.log(`[TFLite] Download progress: ${modelDownloadProgress}%`);
+          }
+        }
+        buffer = new Uint8Array(chunks.reduce((acc, cur) => acc + cur.length, 0));
+        let offset = 0;
+        for (const chunk of chunks) {
+          buffer.set(chunk, offset);
+          offset += chunk.length;
+        }
+      } else {
+        buffer = new Uint8Array(await response.arrayBuffer());
+        modelDownloadProgress = 100;
+        console.log('[TFLite] Download progress: 100%');
+      }
+
+      // Await model loading and catch errors
+      try {
+        // tflite.loadTFLiteModel expects ArrayBuffer, not Uint8Array or SharedArrayBuffer
+        let ab: ArrayBuffer;
+        if (buffer instanceof Uint8Array) {
+          ab = buffer.buffer as ArrayBuffer;
+        } else if (buffer instanceof ArrayBuffer) {
+          ab = buffer;
+        } else {
+          throw new Error('Model buffer is not a valid ArrayBuffer or Uint8Array');
+        }
+        model = await tflite!.loadTFLiteModel(ab) as TFLiteModel;
+        modelDownloaded = true;
+        console.log("[TFLite] Model loaded and cached.");
+      } catch (modelErr: unknown) {
+        modelDownloadError = "Failed to load TFLite model: " + ((modelErr as Error)?.message || String(modelErr));
+        console.error('[TFLite] Model load error:', modelDownloadError);
+        throw new Error(modelDownloadError);
+      }
+    } catch (err: unknown) {
+      modelDownloadError = (err as Error).message || 'Model download error';
+      modelDownloaded = false;
+      console.error('[TFLite] Model download error:', modelDownloadError);
+      throw err;
+    }
+  }
+
+  if (!tokenizer) {
+    try {
+      const rawTokenizer = await AutoTokenizer.from_pretrained('Helsinki-NLP/opus-mt-en-fr');
+      // Map required properties from snake_case
+      tokenizer = {
+        ...rawTokenizer,
+        padTokenId: (rawTokenizer.pad_token_id ?? 0),
+        bosTokenId: (rawTokenizer.bos_token_id ?? 0),
+        eosTokenId: (rawTokenizer.eos_token_id ?? 0),
+      } as unknown as Tokenizer;
+    } catch (tokErr: unknown) {
+      throw new Error("Tokenizer load failed: " + ((tokErr as Error)?.message || String(tokErr)));
+    }
+  }
+  if (!config) {
+    try {
+      config = await AutoConfig.from_pretrained('Helsinki-NLP/opus-mt-en-fr') as Config;
+    } catch (cfgErr: unknown) {
+      throw new Error("Config load failed: " + ((cfgErr as Error)?.message || String(cfgErr)));
+    }
+  }
+
+  return { model: model!, tokenizer: tokenizer!, config: config! };
+}
+
+function padTrunc(arr: number[], length: number, padVal = 0): number[] {
+  arr = arr.slice(0, length);
+  while (arr.length < length) arr.push(padVal);
+  return arr;
+}
+
+function buildEncoderInputs(text: string, tokenizer: Tokenizer) {
+  const enc = tokenizer.encode(text);
+  const inputIds = padTrunc(enc.ids, MAX_SRC_LEN, tokenizer.padTokenId);
+  const attnMask = padTrunc(enc.attentionMask, MAX_SRC_LEN, 0);
+  return {
+    input_ids: tf!.tensor([inputIds], [1, MAX_SRC_LEN], 'int32'),
+    attention_mask: tf!.tensor([attnMask], [1, MAX_SRC_LEN], 'int32'),
+  };
+}
+
+function buildDecoderInputs(decTokens: number[], tokenizer: Tokenizer) {
+  const decIds = padTrunc([...decTokens], MAX_TGT_LEN, tokenizer.padTokenId);
+  const decMask = padTrunc(new Array(decTokens.length).fill(1), MAX_TGT_LEN, 0);
+  return {
+    decoder_input_ids: tf!.tensor([decIds], [1, MAX_TGT_LEN], 'int32'),
+    decoder_attention_mask: tf!.tensor([decMask], [1, MAX_TGT_LEN], 'int32'),
+  };
+}
+
+export async function translateEnToFr(text: string): Promise<string> {
+  if (typeof window === "undefined") {
+    throw new Error("Translation only works in browser/client-side.");
+  }
+
+  let resources;
+  try {
+    resources = await loadResources();
+  } catch (err: unknown) {
+    throw new Error("Model or tokenizer not loaded: " + ((err as Error)?.message || String(err)));
+  }
+  const { model, tokenizer, config } = resources;
+  const DECODER_START = config.decoder_start_token_id ?? tokenizer.bosTokenId;
+  const EOS_ID = tokenizer.eosTokenId;
+
+  const { input_ids, attention_mask } = buildEncoderInputs(text, tokenizer);
+  const decTokens = [DECODER_START];
+
+  for (let step = 0; step < MAX_TGT_LEN; step++) {
+    const { decoder_input_ids, decoder_attention_mask } = buildDecoderInputs(decTokens, tokenizer);
+
+    const outputs = model.predict({
+      'serving_default_input_ids:0': input_ids,
+      'serving_default_attention_mask:0': attention_mask,
+      'serving_default_decoder_input_ids:0': decoder_input_ids,
+      'serving_default_decoder_attention_mask:0': decoder_attention_mask,
+    });
+
+    const logits = outputs.arraySync()[0]; // [MAX_TGT_LEN, vocab]
+    const lastLogits = logits[decTokens.length - 1];
+    const nextId = lastLogits.indexOf(Math.max(...lastLogits));
+
+    decTokens.push(nextId);
+    if (nextId === EOS_ID) break;
+  }
+
+  const outIds = decTokens.slice(
+    1,
+    decTokens.indexOf(EOS_ID) > -1 ? decTokens.indexOf(EOS_ID) : undefined
+  );
+  return tokenizer.decode(outIds, { skipSpecialTokens: true });
+}

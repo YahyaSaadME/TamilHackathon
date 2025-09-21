@@ -33,6 +33,7 @@ export default function OCR() {
   const [showSettings, setShowSettings] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string>(""); // NEW
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -67,18 +68,28 @@ export default function OCR() {
 
   // New camera functionality
   const startCamera = async () => {
+    setCameraError(""); // Reset error before starting
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }
+        video: true
       });
       setStream(mediaStream);
       setIsCameraActive(true);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.play().catch(console.error);
       }
-    } catch (error) {
+    } catch (error: unknown) {
+      let message = "Could not access camera. Please check permissions.";
+      if ((error as Error).name === "NotAllowedError") {
+        message = "Camera access was denied. Please allow camera permissions in your browser settings.";
+      } else if ((error as Error).name === "NotFoundError") {
+        message = "No camera device found. Please connect a camera and try again.";
+      } else if ((error as Error).name === "NotReadableError") {
+        message = "Camera is already in use by another application.";
+      }
+      setCameraError(message);
       console.error("Error accessing camera:", error);
-      alert("Could not access camera. Please check permissions.");
     }
   };
 
@@ -235,6 +246,11 @@ export default function OCR() {
                 <div className="text-center">
                   <Camera size={64} className="mx-auto mb-4 text-gray-400" />
                   <p className="mb-4">Camera not active</p>
+                  {cameraError && (
+                    <div className="mb-4 text-red-500 font-medium">
+                      {cameraError}
+                    </div>
+                  )}
                   <button
                     onClick={startCamera}
                     className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
@@ -249,6 +265,7 @@ export default function OCR() {
                   ref={videoRef}
                   autoPlay
                   playsInline
+                  muted
                   className="w-full aspect-video object-cover"
                 />
                 <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex gap-4">
